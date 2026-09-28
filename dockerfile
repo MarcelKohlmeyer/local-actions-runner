@@ -22,7 +22,7 @@ COPY --from=runner-download --chown=1001:1001 /actions-runner /home/docker/actio
 COPY --from=dind /usr/local/bin/dind /usr/local/bin/dind
 
 RUN apt-get update && apt-get upgrade -y \
-	&& apt-get install -y --no-install-recommends sudo ca-certificates git curl jq \
+	&& apt-get install -y --no-install-recommends sudo ca-certificates git curl jq gnupg \
 	   build-essential libssl-dev libffi-dev python3 python3-venv python3-dev python3-pip \
 	&& install -m 0755 -d /etc/apt/keyrings \
 	&& curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc \
