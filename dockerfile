@@ -24,10 +24,11 @@ ENV DOTNET_INSTALL_DIR=/home/docker/.dotnet \
     RUNNER_TOOL_CACHE=/home/docker/_tool \
     AGENT_TOOLSDIRECTORY=/home/docker/_tool
 
-# Base tooling commonly expected by workflows (git, jq, python, build toolchain)
+# Base tooling commonly expected by workflows (git, jq, python, build toolchain, ssh)
 RUN apt-get update && apt-get upgrade -y \
 	&& apt-get install -y --no-install-recommends sudo ca-certificates git curl jq gnupg \
 	   build-essential libssl-dev libffi-dev python3 python3-venv python3-dev python3-pip \
+       openssh-client \
 	&& apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Docker engine, CLI, buildx and compose from Docker's official apt repository
