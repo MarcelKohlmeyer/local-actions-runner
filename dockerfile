@@ -43,6 +43,5 @@ COPY start.sh start.sh
 
 RUN chmod +x start.sh
 
-USER docker
-
+# start.sh launches dockerd as root and then drops to the docker user
 ENTRYPOINT ["./start.sh"]
