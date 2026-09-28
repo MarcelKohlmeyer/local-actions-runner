@@ -11,6 +11,16 @@ services:
       # Containers are published on the runner's own network namespace. Testcontainers would
       # otherwise pick the default gateway (the host) when it detects it runs in a container.
       - TESTCONTAINERS_HOST_OVERRIDE=localhost
+      # Idle deep clean (see README.md); defaults apply when unset in .env
+      - CLEANUP_THRESHOLD=${CLEANUP_THRESHOLD:-70}
+      - CLEANUP_INTERVAL=${CLEANUP_INTERVAL:-300}
+      - CLEANUP_CHECKOUT_HOURS=${CLEANUP_CHECKOUT_HOURS:-24}
+    # Rotate container logs on the host instead of growing them without limit
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     # Every replica registers as its own runner
     deploy:
       mode: replicated

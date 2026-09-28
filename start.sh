@@ -16,7 +16,9 @@ if [ "$(id -u)" = "0" ]; then
     # /run survives container restarts, a stale pid file keeps dockerd from starting
     rm -rf /run/docker.pid /run/docker /run/containerd
 
-    dind dockerd > /var/log/dockerd.log 2>&1 &
+    # Append, so idle-cleanup.sh can truncate the log without leaving a sparse file
+    : > /var/log/dockerd.log
+    dind dockerd >> /var/log/dockerd.log 2>&1 &
     until docker info > /dev/null 2>&1; do
         if ! kill -0 $! 2> /dev/null; then
             echo "dockerd failed to start:" >&2
@@ -25,6 +27,9 @@ if [ "$(id -u)" = "0" ]; then
         fi
         sleep 1
     done
+
+    # Frees disk space while the runner is idle, keeps running as root (see README.md)
+    idle-cleanup.sh &
 
     # setpriv doesn't go through PAM (unlike sudo/su)
     export HOME=/home/docker USER=docker

@@ -60,8 +60,16 @@ RUN groupadd -g 1001 runner \
 	&& chmod 0440 /etc/sudoers.d/docker \
 	&& visudo -c -q
 
+# Build cache GC and log size limits for the runner's docker daemon
+COPY daemon.json /etc/docker/daemon.json
+
+# Storage cleanup: job hooks and the idle deep clean started by start.sh (see README.md)
+COPY scripts/ /usr/local/bin/
+ENV ACTIONS_RUNNER_HOOK_JOB_STARTED=/usr/local/bin/job-started.sh \
+    ACTIONS_RUNNER_HOOK_JOB_COMPLETED=/usr/local/bin/job-completed.sh
+
 COPY start.sh /start.sh
-RUN chmod +x /start.sh
+RUN chmod +x /start.sh /usr/local/bin/job-started.sh /usr/local/bin/job-completed.sh /usr/local/bin/idle-cleanup.sh
 
 # start.sh launches dockerd as root and then drops to the docker user
 ENTRYPOINT ["/start.sh"]
