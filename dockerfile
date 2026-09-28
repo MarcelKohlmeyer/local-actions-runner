@@ -1,6 +1,13 @@
-FROM ubuntu:26.04
+FROM ubuntu:26.04 AS runner-download
 
 ARG RUNNER_VERSION="2.337.0"
+
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
+	&& mkdir /actions-runner \
+	&& curl -fsSL https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz \
+	| tar xz -C /actions-runner
+
+FROM ubuntu:26.04
 
 ARG DEBIAN_FRONTEND=noninteractive
 
@@ -8,32 +15,24 @@ ENV DOTNET_INSTALL_DIR=/home/docker/.dotnet \
     RUNNER_TOOL_CACHE=/home/docker/_tool \
     AGENT_TOOLSDIRECTORY=/home/docker/_tool
 
-RUN apt update -y && apt upgrade -y && useradd -m docker
+COPY --from=runner-download --chown=1001:1001 /actions-runner /home/docker/actions-runner
 
-RUN mkdir -p /home/docker/.dotnet /home/docker/_tool \
-	&& chown -R docker:docker /home/docker
-
-RUN apt-get update && apt-get install -y sudo \
-	&& echo "docker ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/docker \
-	&& chmod 0440 /etc/sudoers.d/docker
-
-RUN apt install -y --no-install-recommends git curl jq build-essential libssl-dev libffi-dev python3 python3-venv python3-dev python3-pip
-
-# add Docker:
-RUN apt-get update && apt-get install -y ca-certificates curl \
+RUN apt-get update && apt-get upgrade -y \
+	&& apt-get install -y --no-install-recommends sudo ca-certificates git curl jq \
+	   build-essential libssl-dev libffi-dev python3 python3-venv python3-dev python3-pip \
 	&& install -m 0755 -d /etc/apt/keyrings \
 	&& curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc \
-	&& echo "deb [signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" \ 
-	> /etc/apt/sources.list.d/docker.list \
+	&& echo "deb [signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" \
+	   > /etc/apt/sources.list.d/docker.list \
 	&& apt-get update \
-	&& apt-get install -y docker-ce-cli docker-buildx-plugin docker-compose-plugin \
-	&& rm -rf /var/lib/apt/lists/*
-
-RUN cd /home/docker && mkdir actions-runner && cd actions-runner \
-	&& curl -O -L https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz \
-	&& tar xzf ./actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz
-
-RUN chown -R docker ~docker && /home/docker/actions-runner/bin/installdependencies.sh
+	&& apt-get install -y --no-install-recommends docker-ce-cli docker-buildx-plugin docker-compose-plugin \
+	&& /home/docker/actions-runner/bin/installdependencies.sh \
+	&& useradd -m -u 1001 docker \
+	&& mkdir -p /home/docker/.dotnet /home/docker/_tool \
+	&& chown docker:docker /home/docker /home/docker/.dotnet /home/docker/_tool \
+	&& echo "docker ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/docker \
+	&& chmod 0440 /etc/sudoers.d/docker \
+	&& apt-get clean && rm -rf /var/lib/apt/lists/*
 
 COPY start.sh start.sh
 
