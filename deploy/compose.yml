@@ -1,3 +1,4 @@
+# Runs REPLICA_COUNT self-hosted runners for REPO; values come from .env (see example.env)
 services:
   runner:
     image: ghcr.io/marcelkohlmeyer/local-actions-runner:latest
@@ -10,6 +11,7 @@ services:
       # Containers are published on the runner's own network namespace. Testcontainers would
       # otherwise pick the default gateway (the host) when it detects it runs in a container.
       - TESTCONTAINERS_HOST_OVERRIDE=localhost
+    # Every replica registers as its own runner
     deploy:
       mode: replicated
       replicas: ${REPLICA_COUNT}

@@ -1,3 +1,4 @@
+# Builds the runner image and publishes it as ghcr.io/<owner>/local-actions-runner:latest
 name: Build and Push latest
 on:
   push:
