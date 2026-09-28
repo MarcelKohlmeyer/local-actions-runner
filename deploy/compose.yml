@@ -1,38 +1,18 @@
 services:
-  # Docker daemon for the runners' jobs, isolated from the host's daemon
-  dind:
-    image: docker:29-dind
-    restart: always
-    privileged: true
-    # Only reachable from containers sharing this network namespace (the runners)
-    command: ["dockerd", "--host=unix:///var/run/docker.sock", "--host=tcp://127.0.0.1:2375", "--tls=false"]
-    environment:
-      - DOCKER_TLS_CERTDIR=
-    volumes:
-      - dind-storage:/var/lib/docker
-      # Must be mounted under the same path as in the runners: dind resolves the
-      # runner's bind mounts for job containers (/__e, /__w, /__t) in its own filesystem.
-      - runner-data:/runner-data
-
   runner:
     image: ghcr.io/marcelkohlmeyer/local-actions-runner:latest
     restart: always
-    depends_on:
-      - dind
-    # Share dind's network namespace, so ports published by job/service containers
-    # are reachable on localhost, like on GitHub-hosted runners
-    network_mode: service:dind
+    # Each runner starts its own docker daemon (see start.sh), which needs a privileged container
+    privileged: true
     environment:
       - REPO=${REPO}
       - TOKEN=${TOKEN}
-      - DOCKER_HOST=tcp://127.0.0.1:2375
-      - RUNNER_DATA_DIR=/runner-data
+      # Containers are published on the runner's own network namespace. Testcontainers would
+      # otherwise pick the default gateway (the host) when it detects it runs in a container.
+      - TESTCONTAINERS_HOST_OVERRIDE=localhost
     deploy:
       mode: replicated
       replicas: ${REPLICA_COUNT}
     volumes:
-      - runner-data:/runner-data
-
-volumes:
-  dind-storage:
-  runner-data:
+      # dockerd can't use overlay2 on top of the container's overlay filesystem
+      - /var/lib/docker
