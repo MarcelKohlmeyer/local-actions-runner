@@ -7,6 +7,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 	&& curl -fsSL https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz \
 	| tar xz -C /actions-runner
 
+FROM docker:29-dind AS dind
+
 FROM ubuntu:26.04
 
 ARG DEBIAN_FRONTEND=noninteractive
@@ -16,6 +18,8 @@ ENV DOTNET_INSTALL_DIR=/home/docker/.dotnet \
     AGENT_TOOLSDIRECTORY=/home/docker/_tool
 
 COPY --from=runner-download --chown=1001:1001 /actions-runner /home/docker/actions-runner
+# Prepares cgroups and mounts for running dockerd inside a (privileged) container
+COPY --from=dind /usr/local/bin/dind /usr/local/bin/dind
 
 RUN apt-get update && apt-get upgrade -y \
 	&& apt-get install -y --no-install-recommends sudo ca-certificates git curl jq \
@@ -25,11 +29,12 @@ RUN apt-get update && apt-get upgrade -y \
 	&& echo "deb [signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" \
 	   > /etc/apt/sources.list.d/docker.list \
 	&& apt-get update \
-	&& apt-get install -y --no-install-recommends docker-ce-cli docker-buildx-plugin docker-compose-plugin \
+	&& apt-get install -y --no-install-recommends docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin \
 	&& /home/docker/actions-runner/bin/installdependencies.sh \
-	&& useradd -m -u 1001 docker \
+	&& groupadd -g 1001 runner \
+	&& useradd -m -u 1001 -g runner -G docker docker \
 	&& mkdir -p /home/docker/.dotnet /home/docker/_tool \
-	&& chown docker:docker /home/docker /home/docker/.dotnet /home/docker/_tool \
+	&& chown docker:runner /home/docker /home/docker/.dotnet /home/docker/_tool \
 	&& echo "docker ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/docker \
 	&& chmod 0440 /etc/sudoers.d/docker \
 	&& apt-get clean && rm -rf /var/lib/apt/lists/*
