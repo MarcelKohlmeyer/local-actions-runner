@@ -1,21 +1,38 @@
 services:
+  # Docker daemon for the runners' jobs, isolated from the host's daemon
+  dind:
+    image: docker:29-dind
+    restart: always
+    privileged: true
+    # Only reachable from containers sharing this network namespace (the runners)
+    command: ["dockerd", "--host=unix:///var/run/docker.sock", "--host=tcp://127.0.0.1:2375", "--tls=false"]
+    environment:
+      - DOCKER_TLS_CERTDIR=
+    volumes:
+      - dind-storage:/var/lib/docker
+      # Must be mounted under the same path as in the runners: dind resolves the
+      # runner's bind mounts for job containers (/__e, /__w, /__t) in its own filesystem.
+      - runner-data:/runner-data
+
   runner:
     image: ghcr.io/marcelkohlmeyer/local-actions-runner:latest
     restart: always
+    depends_on:
+      - dind
+    # Share dind's network namespace, so ports published by job/service containers
+    # are reachable on localhost, like on GitHub-hosted runners
+    network_mode: service:dind
     environment:
       - REPO=${REPO}
       - TOKEN=${TOKEN}
-      - TESTCONTAINERS_HOST_OVERRIDE=host.docker.internal
-      - RUNNER_DATA_DIR=${RUNNER_DATA_DIR}
-    group_add:
-      - "${DOCKER_GID}"   # e.g. DOCKER_GID=$(getent group docker | cut -d: -f3)
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - DOCKER_HOST=tcp://127.0.0.1:2375
+      - RUNNER_DATA_DIR=/runner-data
     deploy:
       mode: replicated
       replicas: ${REPLICA_COUNT}
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      # Must be mounted under the identical path: job containers are created by the
-      # host daemon, which resolves the runner's bind mounts (/__e, /__w, /__t) on the host.
-      - ${RUNNER_DATA_DIR}:${RUNNER_DATA_DIR}
+      - runner-data:/runner-data
+
+volumes:
+  dind-storage:
+  runner-data:
