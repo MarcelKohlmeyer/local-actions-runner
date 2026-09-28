@@ -6,6 +6,7 @@ services:
       - REPO=${REPO}
       - TOKEN=${TOKEN}
       - TESTCONTAINERS_HOST_OVERRIDE=host.docker.internal
+      - RUNNER_DATA_DIR=${RUNNER_DATA_DIR}
     group_add:
       - "${DOCKER_GID}"   # e.g. DOCKER_GID=$(getent group docker | cut -d: -f3)
     extra_hosts:
@@ -15,3 +16,6 @@ services:
       replicas: ${REPLICA_COUNT}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      # Must be mounted under the identical path: job containers are created by the
+      # host daemon, which resolves the runner's bind mounts (/__e, /__w, /__t) on the host.
+      - ${RUNNER_DATA_DIR}:${RUNNER_DATA_DIR}
