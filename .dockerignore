@@ -1,1 +1,6 @@
 deploy/
+.git
+.github
+.gitignore
+.dockerignore
+Dockerfile*
