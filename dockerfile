@@ -4,7 +4,18 @@ ARG RUNNER_VERSION="2.337.0"
 
 ARG DEBIAN_FRONTEND=noninteractive
 
+ENV DOTNET_INSTALL_DIR=/home/docker/.dotnet \
+    RUNNER_TOOL_CACHE=/home/docker/_tool \
+    AGENT_TOOLSDIRECTORY=/home/docker/_tool
+
 RUN apt update -y && apt upgrade -y && useradd -m docker
+
+RUN mkdir -p /home/docker/.dotnet /home/docker/_tool \
+	&& chown -R docker:docker /home/docker
+
+RUN apt-get update && apt-get install -y sudo \
+	&& echo "docker ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/docker \
+ && chmod 0440 /etc/sudoers.d/docker
 
 RUN apt install -y --no-install-recommends curl jq build-essential libssl-dev libffi-dev python3 python3-venv python3-dev python3-pip
 
