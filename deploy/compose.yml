@@ -5,13 +5,13 @@ services:
     environment:
       - REPO=${REPO}
       - TOKEN=${TOKEN}
+      - TESTCONTAINERS_HOST_OVERRIDE=host.docker.internal
+    group_add:
+      - "${DOCKER_GID}"   # e.g. DOCKER_GID=$(getent group docker | cut -d: -f3)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     deploy:
       mode: replicated
       replicas: ${REPLICA_COUNT}
-      resources: 
-        limits:
-          cpus: "0.5"
-          memory: 1G
-        reservations:
-          cpus: "0.25"
-          memory: 250M
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
