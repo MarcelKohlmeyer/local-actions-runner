@@ -1,18 +1,32 @@
 #!/bin/bash
 # Idle deep clean, started as root in the background by start.sh. Every CLEANUP_INTERVAL
-# seconds it checks whether the runner is idle and the disk under /var/lib/docker is
-# fuller than CLEANUP_THRESHOLD percent, and if so frees space. See README.md.
+# seconds it checks whether the runner is idle, removes what an interrupted job left
+# behind, and frees space when the disk under /var/lib/docker is fuller than
+# CLEANUP_THRESHOLD percent. It only logs what it removed. See README.md.
 #
 # Usage: idle-cleanup.sh [--once]   (--once runs a single iteration, for testing)
 
 # Globs without matches expand to nothing (e.g. an empty tool cache)
 shopt -s nullglob
 
-INTERVAL=${CLEANUP_INTERVAL:-300}
-THRESHOLD=${CLEANUP_THRESHOLD:-70}
+log() { echo "idle-cleanup: $*"; }
+
+# Prints the setting $1, or the default $2 when it isn't a whole number from $3 to $4
+setting() {
+    local value=${!1:-$2}
+    if [[ $value =~ ^[0-9]{1,6}$ ]] && ((10#$value >= $3 && 10#$value <= $4)); then
+        echo $((10#$value))
+    else
+        log "invalid $1='$value', using $2" >&2
+        echo "$2"
+    fi
+}
+
+INTERVAL=$(setting CLEANUP_INTERVAL 300 1 999999)
+THRESHOLD=$(setting CLEANUP_THRESHOLD 70 0 100)
 # Checkouts in _work that nothing touched for this many hours may be removed
-CHECKOUT_HOURS=${CLEANUP_CHECKOUT_HOURS:-24}
-# Keep runner _diag logs for this many days
+CHECKOUT_HOURS=$(setting CLEANUP_CHECKOUT_HOURS 24 0 999999)
+# Backstop for _diag files the runner's own log retention (ENV in the dockerfile) misses
 DIAG_DAYS=7
 # Keep this many most recently installed versions per tool in the tool cache
 TOOL_VERSIONS=3
@@ -25,11 +39,16 @@ LOCK=/run/runner-cleanup.lock
 RUNNER=/home/docker/actions-runner
 TOOLS=${RUNNER_TOOL_CACHE:-/home/docker/_tool}
 DOCKERD_LOG=/var/log/dockerd.log
+# Checkouts are renamed into here before deletion. Same filesystem as _work (the
+# container's writable layer), but outside it, so the runner never sees it.
+TRASH=/home/docker/.cleanup-trash
 
-log() { echo "idle-cleanup: $*"; }
-
-# A job is running while there is a Runner.Worker process
-busy() { pgrep -f '(^|/)Runner\.Worker( |$)' > /dev/null; }
+# A job is running while there is a Runner.Worker process. pgrep exits 1 for "no match",
+# anything else (0 or an error) counts as busy, so an error never starts a clean.
+busy() {
+    pgrep -f '(^|/)Runner\.Worker( |$)' > /dev/null
+    [ $? -ne 1 ]
+}
 
 # Usage in percent. This is the host's filesystem, shared by all runners on the host.
 usage() { df --output=pcent /var/lib/docker | tail -n 1 | tr -dc '0-9'; }
@@ -39,6 +58,24 @@ cap_dockerd_log() {
     if [ "$(stat -c %s "$DOCKERD_LOG" 2> /dev/null || echo 0)" -gt "$DOCKERD_LOG_MAX" ]; then
         truncate -s 0 "$DOCKERD_LOG" && log "truncated $DOCKERD_LOG"
     fi
+}
+
+# A job whose worker crashed never ran job-completed.sh, so do that now
+remove_leftovers() {
+    if [ -n "$(docker ps -aq)$(docker volume ls -q)$(docker network ls -q --filter type=custom)" ]; then
+        log "removing leftovers of an interrupted job"
+        job-completed.sh 2>&1 | sed '/^$/d; s/^/idle-cleanup: /'
+    fi
+}
+
+# Runs "docker $1 prune -af" and logs the reclaimed space, unless it was nothing
+prune() {
+    local total
+    total=$(docker "$1" prune -af 2> /dev/null | tail -n 1 | tr -s '\t' ' ')
+    case $total in
+        '' | *' 0B') ;;
+        *) log "disk above ${THRESHOLD}%, docker $1 prune: $total" ;;
+    esac
 }
 
 # Removes the tool versions beyond the newest TOOL_VERSIONS of every tool
@@ -57,15 +94,17 @@ trim_tools() {
 # starting with "_" (_actions, _temp, _PipelineMapping, ...) belong to the runner.
 remove_checkouts() {
     local dir
+    mkdir -p "$TRASH"
     for dir in "$RUNNER"/_work/[!_]*/; do
-        if busy; then
-            log "job started, keeping checkouts"
-            return
-        fi
+        dir=${dir%/}
         # Depth 3 reaches <repo>/<repo>/.git/*, which every git fetch/checkout updates
-        if [ -z "$(find "$dir" -maxdepth 3 -mmin -$((CHECKOUT_HOURS * 60)) -print -quit)" ]; then
-            rm -rf "$dir" && log "removed checkout $dir"
-        fi
+        [ -z "$(find "$dir" -maxdepth 3 -mmin -$((CHECKOUT_HOURS * 60)) -print -quit)" ] || continue
+        # Stop once a job starts. The rename is atomic, so a job starting right after it
+        # finds no directory and creates a fresh one instead of a half-deleted one.
+        busy && return
+        mv --no-copy -T "$dir" "$TRASH/${dir##*/}" || continue
+        rm -rf "${TRASH:?}/${dir##*/}"
+        log "disk at $(usage)%, removed checkout $dir"
     done
 }
 
@@ -74,23 +113,17 @@ deep_clean() {
     flock -w 60 9 || return
     busy && return
 
-    local pcent
-    pcent=$(usage)
-    [ "$pcent" -gt "$THRESHOLD" ] || return
-    log "disk at ${pcent}% (threshold ${THRESHOLD}%), cleaning"
+    remove_leftovers
+    # Finish deletions a killed earlier run left behind
+    rm -rf "$TRASH"
 
-    docker container prune -f > /dev/null
-    log "images: $(docker image prune -af | tail -n 1)"
-    log "build cache: $(docker builder prune -af | tail -n 1 | tr -s '\t' ' ')"
+    [ "$(usage)" -gt "$THRESHOLD" ] || return
+    prune image
+    prune builder
     find "$RUNNER/_diag" -type f -mtime +"$DIAG_DAYS" -print -delete 2> /dev/null | sed 's/^/idle-cleanup: removed log /'
     trim_tools
 
-    pcent=$(usage)
-    if [ "$pcent" -gt "$THRESHOLD" ]; then
-        log "disk still at ${pcent}%, removing checkouts untouched for ${CHECKOUT_HOURS}h"
-        remove_checkouts
-    fi
-    log "done, disk at $(usage)%"
+    [ "$(usage)" -gt "$THRESHOLD" ] && remove_checkouts
 }
 
 touch "$LOCK" && chmod 0644 "$LOCK"
