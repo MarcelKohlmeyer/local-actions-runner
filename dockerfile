@@ -36,7 +36,10 @@ RUN apt-get update && apt-get upgrade -y \
 	&& mkdir -p /home/docker/.dotnet /home/docker/_tool \
 	&& chown docker:runner /home/docker /home/docker/.dotnet /home/docker/_tool \
 	&& echo "docker ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/docker \
+	# PAM account validation fails for every user on some hosts (privileged container), breaking sudo
+	&& echo "Defaults !pam_acct_mgmt" >> /etc/sudoers.d/docker \
 	&& chmod 0440 /etc/sudoers.d/docker \
+	&& visudo -c -q \
 	&& apt-get clean && rm -rf /var/lib/apt/lists/*
 
 COPY start.sh start.sh
