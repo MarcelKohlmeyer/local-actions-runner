@@ -17,6 +17,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
       - name: Build Image
-        run: docker build . --tag ghcr.io/$GITHUB_ACTOR/local-actions-runner:latest
+        run: docker build . --tag ghcr.io/${GITHUB_ACTOR,,}/local-actions-runner:latest
       - name: Publish to GHCR
-        run: docker push ghcr.io/$GITHUB_ACTOR/local-actions-runner:latest
+        run: docker push ghcr.io/${GITHUB_ACTOR,,}/local-actions-runner:latest
