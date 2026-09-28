@@ -3,18 +3,19 @@
 REPOSITORY=$REPO
 ACCESS_TOKEN=$TOKEN
 
-# Job containers are started by the host's docker daemon (socket handthrough), which
-# resolves bind-mount sources on the host. The runner (including externals/ and _work/)
-# therefore has to live in a directory that exists under the same path on the host and
-# in this container. RUNNER_DATA_DIR is mounted 1:1, each replica gets its own subdirectory.
+# Job containers are started by the dind daemon, which resolves bind-mount sources in its
+# own filesystem. The runner (including externals/ and _work/) therefore has to live in a
+# directory shared with dind under the same path. Each replica gets its own subdirectory.
 if [ -z "${RUNNER_DATA_DIR}" ]; then
     echo "RUNNER_DATA_DIR is not set" >&2
     exit 1
 fi
 
-INSTANCE_DIR="${RUNNER_DATA_DIR}/${HOSTNAME}"
+# Replicas share dind's network namespace and with it its hostname, so it can't be used
+# to tell them apart
+RUNNER_NAME="runner-$(head -c 4 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+INSTANCE_DIR="${RUNNER_DATA_DIR}/${RUNNER_NAME}"
 
-sudo rm -rf "${INSTANCE_DIR}"
 sudo mkdir -p "${INSTANCE_DIR}"
 sudo chown docker:docker "${RUNNER_DATA_DIR}" "${INSTANCE_DIR}"
 cp -a /home/docker/actions-runner/. "${INSTANCE_DIR}/"
@@ -27,7 +28,7 @@ REG_TOKEN=$(curl -X POST -H "Authorization: token ${ACCESS_TOKEN}" -H "Accept: a
 
 cd "${INSTANCE_DIR}"
 
-./config.sh --url https://github.com/${REPOSITORY} --token ${REG_TOKEN}
+./config.sh --url https://github.com/${REPOSITORY} --token ${REG_TOKEN} --name ${RUNNER_NAME}
 
 cleanup() {
     echo "Removing runner..."

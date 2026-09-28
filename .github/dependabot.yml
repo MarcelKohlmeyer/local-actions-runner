@@ -8,6 +8,14 @@ updates:
     commit-message:
       prefix: "chore(docker)"
 
+  # dind image in the compose deployment
+  - package-ecosystem: docker-compose
+    directory: /deploy
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(docker)"
+
   # Actions used in .github/workflows
   - package-ecosystem: github-actions
     directory: /
