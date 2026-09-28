@@ -1,0 +1,22 @@
+name: Build and Push latest
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build_and_publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Authenticate to GitHub Container Registry
+        run: echo "$GITHUB_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      - name: Build Image
+        run: docker build . --tag ghcr.io/$GITHUB_ACTOR/local-actions-runner:latest
+      - name: Publish to GHCR
+        run: docker push ghcr.io/$GITHUB_ACTOR/local-actions-runner:latest

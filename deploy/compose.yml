@@ -1,0 +1,17 @@
+services:
+  runner:
+    image: ghcr.io/marcelkohlmeyer/local-actions-runner:latest
+    restart: always
+    environment:
+      - REPO=${REPO}
+      - TOKEN=${TOKEN}
+    deploy:
+      mode: replicated
+      replicas: ${REPLICA_COUNT}
+      resources: 
+        limits:
+          cpus: "0.5"
+          memory: 500M
+        reservations:
+          cpus: "0.25"
+          memory: 250M
