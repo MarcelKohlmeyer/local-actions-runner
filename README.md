@@ -25,6 +25,9 @@ docker compose up -d
 | `REPO`          | Repository to register the runners for (`owner/repo`)          |
 | `TOKEN`         | Personal access token that can create runner registration tokens for `REPO` |
 | `REPLICA_COUNT` | Number of runners to start                                    |
+| `CLEANUP_THRESHOLD` | Disk usage in percent above which the idle deep clean runs (default `70`) |
+| `CLEANUP_INTERVAL` | Seconds between idle deep clean checks (default `300`)     |
+| `CLEANUP_CHECKOUT_HOURS` | Age in hours after which an untouched checkout may be removed (default `24`) |
 
 Runners register on start and deregister when the container is stopped.
 
@@ -33,6 +36,56 @@ Notes:
 - The container must run `privileged` so it can start dockerd.
 - `/var/lib/docker` has to be a volume, as dockerd can't use overlay2 on top of the
   container's overlay filesystem.
+- `docker compose down` without `-v` leaves the anonymous `/var/lib/docker` volumes of
+  all runners behind on the host, and `up` creates new ones. Use `docker compose down -v`,
+  or remove orphaned volumes later with `docker volume prune` on the host.
+
+## Storage cleanup
+
+Runners are reused for many jobs, so the image cleans up after itself:
+
+- **After every job** (`ACTIONS_RUNNER_HOOK_JOB_COMPLETED`, `scripts/job-completed.sh`):
+  removes all containers in the runner's docker daemon, prunes unused volumes (named ones
+  too) and networks, and clears `/tmp` (without descending into mounts under it). Every
+  command has a timeout and errors are ignored, so it never fails or hangs the job.
+- **Idle deep clean** (`scripts/idle-cleanup.sh`, started as root by `start.sh`): every
+  `CLEANUP_INTERVAL` seconds it takes a lock and checks that no job is running (no
+  `Runner.Worker` process). If a job crashed before its after-job cleanup, it runs that
+  cleanup now. If the disk holding `/var/lib/docker` is above `CLEANUP_THRESHOLD`
+  percent, it also
+  1. prunes all unused images and the whole build cache,
+  2. deletes runner `_diag` files older than 7 days (the runner itself also keeps its
+     logs for 7 days, via `RUNNER_LOGRETENTION`/`WORKER_LOGRETENTION`),
+  3. keeps only the 3 most recently *installed* versions of each tool in `~/_tool`.
+     Versions are ranked by install time, not by last use, so a long-installed version
+     that is still in use can be removed and is then downloaded again,
+  4. if the disk is still above the threshold, removes `_work/<repo>` checkouts that
+     nothing touched for `CLEANUP_CHECKOUT_HOURS`. Runner directories such as
+     `_work/_actions` and `_work/_temp` are never touched.
+
+  It only logs what it actually removed, to the container log. Invalid `CLEANUP_*`
+  values fall back to their defaults with a log line.
+- **Before every job** (`ACTIONS_RUNNER_HOOK_JOB_STARTED`, `scripts/job-started.sh`):
+  waits while the deep clean holds its lock (`/run/runner-cleanup.lock`, at most 30
+  minutes), so a job never starts in the middle of a prune.
+- **Build cache and logs**: `/etc/docker/daemon.json` enables BuildKit garbage collection
+  with a 10GB cap and limits the logs of job containers (json-file, 3 x 10MB).
+  `/var/log/dockerd.log` is truncated once it exceeds 10MB, and `deploy/compose.yml`
+  limits the runner containers' own logs on the host the same way.
+
+The threshold is measured with `df` on `/var/lib/docker`. Since the anonymous volumes
+live on the host's filesystem, that is the **host's** disk usage, shared by all runners
+and anything else on it. Once the host goes above the threshold, every idle runner
+cleans, and while other data keeps it above, they do so every interval. Pruning images
+means the next jobs pull them again. Checkouts are only removed once they are older than
+`CLEANUP_CHECKOUT_HOURS`, so busy repositories keep theirs; raise the value to keep
+checkouts longer. Runners start their checks at a random offset within the interval so
+they don't all clean at once.
+
+**Check the host's baseline disk usage** (`df -h /var/lib/docker` on the host, i.e. what
+is used without the runners' caches) and set `CLEANUP_THRESHOLD` comfortably above it. If the host
+stays above the threshold anyway, every idle runner prunes all its images every
+interval, which effectively turns the image cache off.
 
 ## Building
 

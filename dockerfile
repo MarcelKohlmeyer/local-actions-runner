@@ -26,7 +26,7 @@ ENV DOTNET_INSTALL_DIR=/home/docker/.dotnet \
 
 # Base tooling commonly expected by workflows (git, jq, python, build toolchain, ssh)
 RUN apt-get update && apt-get upgrade -y \
-	&& apt-get install -y --no-install-recommends sudo ca-certificates git curl jq gnupg \
+	&& apt-get install -y --no-install-recommends sudo ca-certificates git curl jq gnupg procps \
 	   build-essential libssl-dev libffi-dev python3 python3-venv python3-dev python3-pip \
        openssh-client \
 	&& apt-get clean && rm -rf /var/lib/apt/lists/*
@@ -61,8 +61,19 @@ RUN groupadd -g 1001 runner \
 	&& chmod 0440 /etc/sudoers.d/docker \
 	&& visudo -c -q
 
+# Build cache GC and log size limits for the runner's docker daemon
+COPY daemon.json /etc/docker/daemon.json
+
+# Storage cleanup: job hooks and the idle deep clean started by start.sh (see README.md)
+COPY scripts/ /usr/local/bin/
+ENV ACTIONS_RUNNER_HOOK_JOB_STARTED=/usr/local/bin/job-started.sh \
+    ACTIONS_RUNNER_HOOK_JOB_COMPLETED=/usr/local/bin/job-completed.sh \
+    # Days the runner keeps its own _diag logs (default 30)
+    RUNNER_LOGRETENTION=7 \
+    WORKER_LOGRETENTION=7
+
 COPY start.sh /start.sh
-RUN chmod +x /start.sh
+RUN chmod +x /start.sh /usr/local/bin/job-started.sh /usr/local/bin/job-completed.sh /usr/local/bin/idle-cleanup.sh
 
 # start.sh launches dockerd as root and then drops to the docker user
 ENTRYPOINT ["/start.sh"]
